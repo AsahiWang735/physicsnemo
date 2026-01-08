@@ -438,6 +438,17 @@ class DoMINO(nn.Module):
 
 > 由于篇幅巨大，本节保留逐行注释风格，但对重复结构按块说明；与初版一致的行号定位依旧有效。
 
+### 3.0 文件级详细说明（新增）
+
+本文件定义 DoMINO 的**几何表示核心模块**，用于把 STL 网格点与 SDF 信号映射为规则 3D grid 特征。主要包含：
+
+- **`scale_sdf`**：SDF 的非线性缩放函数，用于强化近表面区域。
+- **`GeoConvOut`**：把局部邻域点投影到规则 3D grid 的 MLP 模块。
+- **`GeoProcessor`**：几何特征传播的 3D CNN/UNet 风格编码器-解码器。
+- **`GeometryRep`**：整合多尺度 STL 分支与 SDF 分支，输出统一几何编码。
+
+其中 `GeometryRep` 是后续 `DoMINO` 主模型几何编码的核心依赖。
+
 ### 3.1 `scale_sdf`
 ```python
 def scale_sdf(sdf: torch.Tensor, scaling_factor: float = 0.04) -> torch.Tensor:
@@ -462,6 +473,15 @@ def scale_sdf(sdf: torch.Tensor, scaling_factor: float = 0.04) -> torch.Tensor:
 
 ## 4. `physicsnemo/models/domino/encodings.py`
 
+### 4.0 文件级详细说明（新增）
+
+本文件实现 **局部几何编码**，负责把 `GeometryRep` 输出的 3D grid 特征映射回 mesh 点或采样点。主要结构：
+
+- **`LocalGeometryEncoding`**：对单个半径范围执行 `BQWarp` 采样 + `LocalPointConv` 聚合。
+- **`MultiGeometryEncoding`**：对多个半径范围并行编码，然后沿特征维拼接。
+
+该模块的输出直接进入 `SolutionCalculator`，提供局部几何上下文信息。
+
 ### 4.1 `LocalGeometryEncoding`
 - 输入 `(B, C, nx, ny, nz)` + `(B, N, 3)` → 输出 `(B, N, neighbors)`。
 
@@ -472,6 +492,15 @@ def scale_sdf(sdf: torch.Tensor, scaling_factor: float = 0.04) -> torch.Tensor:
 
 ## 5. `physicsnemo/models/domino/mlps.py`
 
+### 5.0 文件级详细说明（新增）
+
+本文件集中定义 DoMINO 的**两类关键 MLP 子模块**：
+
+- **`AggregationModel`**：固定 5 层 MLP，用于融合 basis、几何编码、位置编码与参数编码。
+- **`LocalPointConv`**：固定 2 层 MLP，用于局部邻域特征聚合（局部卷积近似）。
+
+这两个模块在整个 DoMINO 前向流程中承担“信息融合”的关键作用。
+
 ### 5.1 `AggregationModel`
 - 5 层 MLP，输出 `(B, N, 1)`。
 
@@ -481,6 +510,17 @@ def scale_sdf(sdf: torch.Tensor, scaling_factor: float = 0.04) -> torch.Tensor:
 ---
 
 ## 6. `physicsnemo/models/domino/solutions.py`
+
+### 6.0 文件级详细说明（新增）
+
+本文件实现 DoMINO 的**输出解算逻辑**。核心包含：
+
+- 参数编码工具：`apply_parameter_encoding`
+- 邻域采样工具：`sample_sphere`、`sample_sphere_shell`
+- **`SolutionCalculatorVolume`**：体积分支输出解算
+- **`SolutionCalculatorSurface`**：表面分支输出解算
+
+解算器会组合 basis、几何编码、位置编码，并执行邻域加权聚合以得到最终输出。
 
 ### 6.1 `apply_parameter_encoding`
 - `(B, G, 1)` → `(B, N_points, G)`。
@@ -495,17 +535,51 @@ def scale_sdf(sdf: torch.Tensor, scaling_factor: float = 0.04) -> torch.Tensor:
 
 ## 7. `physicsnemo/models/domino/utils/utils.py`
 
+### 7.0 文件级详细说明（新增）
+
+本文件是 DoMINO 的**通用工具库**，涵盖：
+
+- 统计与标准化：`normalize`/`unnormalize`/`standardize`/`unstandardize`
+- 采样与打乱：`shuffle_array`、`area_weighted_shuffle_array`
+- 网格与位置编码：`create_grid`、`calculate_pos_encoding`
+- mesh 采样：`sample_points_on_mesh`
+- 设备迁移与 IO：`dict_to_device`、`create_directory`
+
+这些工具被 `DoMINODataPipe` 和训练/推理流程广泛调用。
+
 - 各函数详解已在初版列出；本版已合并在初始化与流程中。
 
 ---
 
 ## 8. `physicsnemo/models/domino/utils/vtk_file_utils.py`
 
+### 8.0 文件级详细说明（新增）
+
+本文件负责 **VTK / PyVista 相关 I/O 与网格处理**，常用于离线预处理与可视化：
+
+- `write_to_vtp` / `write_to_vtu`：写入 VTK 文件
+- `convert_to_tet_mesh`：表面网格转体积网格
+- `get_vertices` / `get_fields`：提取点/场数据
+- `extract_surface_triangles`：使用 PyVista 提取表面三角形
+
+不涉及神经网络计算，但对数据准备与调试非常关键。
+
 - 主要为 VTK I/O 操作，无 tensor 形状变化。
 
 ---
 
 ## 9. `physicsnemo/datapipes/cae/domino_datapipe.py`
+
+### 9.0 文件级详细说明（新增）
+
+本文件实现 DoMINO 的**核心数据管道**，承担从原始 CFD 数据到模型输入字典的全部转换。主要包含：
+
+- **`DoMINODataConfig`**：数据管道的配置对象
+- **`DoMINODataPipe`**：负责预处理（采样、SDF、归一化等）
+- **`CachedDoMINODataset`**：缓存读取与二次采样
+- `create_domino_dataset`：构造 Dataset + DataPipe 的入口
+
+该文件与模型输入字段一一对应，是理解 DoMINO 前向输入结构的关键。
 
 > 详尽注释与 shape 变化同初版。关键输出 dict 的 shape 在前文已总结。
 
@@ -516,6 +590,7 @@ def scale_sdf(sdf: torch.Tensor, scaling_factor: float = 0.04) -> torch.Tensor:
 flowchart TD
     A[Raw CFD Data: STL + Volume + Surface] --> B[CAEDataset]
     B --> C[DoMINODataPipe.process_data]
+
     C --> C1[Surface Processing]
     C --> C2[Volume Processing]
 
@@ -532,14 +607,51 @@ flowchart TD
 
     E --> F1[GeometryRep Volume]
     E --> F2[GeometryRep Surface]
+
+    subgraph GeometryRep_Volume
+        F1 --> GV1[BQWarp + GeoConvOut (per radius)]
+        GV1 --> GV2[GeoProcessor/UNet (hops)]
+        GV2 --> GV3[geo_processor_out]
+        F1 --> GVS[SDF Branch]
+        GVS --> GVS1[scale_sdf + binary_sdf + gradients]
+        GVS1 --> GVS2[geo_processor_sdf]
+        GVS2 --> GVS3[geo_processor_sdf_out]
+    end
+
+    subgraph GeometryRep_Surface
+        F2 --> GS1[BQWarp + GeoConvOut (per radius)]
+        GS1 --> GS2[GeoProcessor/UNet (hops)]
+        GS2 --> GS3[geo_processor_out]
+        F2 --> GSS[SDF Branch]
+        GSS --> GSS1[scale_sdf + binary_sdf + gradients]
+        GSS1 --> GSS2[geo_processor_sdf]
+        GSS2 --> GSS3[geo_processor_sdf_out]
+    end
+
     F1 --> G1[Volume Local Geometry Encoding]
     F2 --> G2[Surface Local Geometry Encoding]
 
-    G1 --> H1[SolutionCalculatorVolume]
-    G2 --> H2[SolutionCalculatorSurface]
+    G1 --> L1[MultiGeometryEncoding → LocalGeometryEncoding]
+    L1 --> L1a[BQWarp]
+    L1 --> L1b[LocalPointConv]
 
-    H1 --> O1[Volume Outputs]
-    H2 --> O2[Surface Outputs]
+    G2 --> L2[MultiGeometryEncoding → LocalGeometryEncoding]
+    L2 --> L2a[BQWarp]
+    L2 --> L2b[LocalPointConv]
+
+    E --> P1[Position Encoding (fc_p_vol)]
+    E --> P2[Position Encoding (fc_p_surf)]
+
+    G1 --> H1[SolutionCalculatorVolume]
+    P1 --> H1
+    G2 --> H2[SolutionCalculatorSurface]
+    P2 --> H2
+
+    H1 --> A1[AggregationModel x num_variables]
+    H2 --> A2[AggregationModel x num_variables]
+
+    A1 --> O1[Volume Outputs]
+    A2 --> O2[Surface Outputs]
 ```
 
 ---
@@ -561,14 +673,46 @@ flowchart LR
         G2[GeometryRep Surface]
     end
 
+    subgraph GeometryRep_Volume_Internal
+        GV1[BQWarp (per radius)]
+        GV2[GeoConvOut]
+        GV3[GeoProcessor / UNet]
+        GV4[geo_processor_out]
+        GVS1[SDF: scale_sdf + binary + gradients]
+        GVS2[geo_processor_sdf]
+        GVS3[geo_processor_sdf_out]
+    end
+
+    subgraph GeometryRep_Surface_Internal
+        GS1[BQWarp (per radius)]
+        GS2[GeoConvOut]
+        GS3[GeoProcessor / UNet]
+        GS4[geo_processor_out]
+        GSS1[SDF: scale_sdf + binary + gradients]
+        GSS2[geo_processor_sdf]
+        GSS3[geo_processor_sdf_out]
+    end
+
     subgraph LocalEncoding
         L1[MultiGeometryEncoding Volume]
         L2[MultiGeometryEncoding Surface]
+        L1a[LocalGeometryEncoding → BQWarp + LocalPointConv]
+        L2a[LocalGeometryEncoding → BQWarp + LocalPointConv]
     end
 
     subgraph PositionEncoding
-        P1[fc_p_vol]
-        P2[fc_p_surf]
+        P1[fc_p_vol (FourierMLP)]
+        P2[fc_p_surf (FourierMLP)]
+    end
+
+    subgraph BasisFunctions
+        B1[nn_basis_vol (FourierMLP x num_variables)]
+        B2[nn_basis_surf (FourierMLP x num_variables)]
+    end
+
+    subgraph Aggregation
+        A1[AggregationModel x num_variables]
+        A2[AggregationModel x num_variables]
     end
 
     subgraph Solution
@@ -583,21 +727,30 @@ flowchart LR
     I4 --> G2
     I5 --> G2
 
+    G1 --> GV1 --> GV2 --> GV3 --> GV4
+    G1 --> GVS1 --> GVS2 --> GVS3
+    G2 --> GS1 --> GS2 --> GS3 --> GS4
+    G2 --> GSS1 --> GSS2 --> GSS3
+
     G1 --> L1
     G2 --> L2
+    L1 --> L1a
+    L2 --> L2a
 
     I2 --> P1
     I3 --> P2
 
-    L1 --> S1
-    L2 --> S2
     P1 --> S1
     P2 --> S2
+    L1 --> S1
+    L2 --> S2
+    B1 --> S1
+    B2 --> S2
     I6 --> S1
     I6 --> S2
 
-    S1 --> O1[Volume Output]
-    S2 --> O2[Surface Output]
+    S1 --> A1 --> O1[Volume Output]
+    S2 --> A2 --> O2[Surface Output]
 ```
 
 ---
