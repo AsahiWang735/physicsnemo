@@ -609,8 +609,8 @@ flowchart TD
     E --> F2[GeometryRep Surface]
 
     subgraph GeometryRep_Volume
-        F1 --> GV1[BQWarp + GeoConvOut (per radius)]
-        GV1 --> GV2[GeoProcessor/UNet (hops)]
+        F1 --> GV1[BQWarp + GeoConvOut per radius]
+        GV1 --> GV2[GeoProcessor or UNet hops]
         GV2 --> GV3[geo_processor_out]
         F1 --> GVS[SDF Branch]
         GVS --> GVS1[scale_sdf + binary_sdf + gradients]
@@ -619,8 +619,8 @@ flowchart TD
     end
 
     subgraph GeometryRep_Surface
-        F2 --> GS1[BQWarp + GeoConvOut (per radius)]
-        GS1 --> GS2[GeoProcessor/UNet (hops)]
+        F2 --> GS1[BQWarp + GeoConvOut per radius]
+        GS1 --> GS2[GeoProcessor or UNet hops]
         GS2 --> GS3[geo_processor_out]
         F2 --> GSS[SDF Branch]
         GSS --> GSS1[scale_sdf + binary_sdf + gradients]
@@ -631,16 +631,16 @@ flowchart TD
     F1 --> G1[Volume Local Geometry Encoding]
     F2 --> G2[Surface Local Geometry Encoding]
 
-    G1 --> L1[MultiGeometryEncoding → LocalGeometryEncoding]
+    G1 --> L1[MultiGeometryEncoding to LocalGeometryEncoding]
     L1 --> L1a[BQWarp]
     L1 --> L1b[LocalPointConv]
 
-    G2 --> L2[MultiGeometryEncoding → LocalGeometryEncoding]
+    G2 --> L2[MultiGeometryEncoding to LocalGeometryEncoding]
     L2 --> L2a[BQWarp]
     L2 --> L2b[LocalPointConv]
 
-    E --> P1[Position Encoding (fc_p_vol)]
-    E --> P2[Position Encoding (fc_p_surf)]
+    E --> P1[Position Encoding fc_p_vol]
+    E --> P2[Position Encoding fc_p_surf]
 
     G1 --> H1[SolutionCalculatorVolume]
     P1 --> H1
@@ -674,9 +674,9 @@ flowchart LR
     end
 
     subgraph GeometryRep_Volume_Internal
-        GV1[BQWarp (per radius)]
+        GV1[BQWarp per radius]
         GV2[GeoConvOut]
-        GV3[GeoProcessor / UNet]
+        GV3[GeoProcessor or UNet]
         GV4[geo_processor_out]
         GVS1[SDF: scale_sdf + binary + gradients]
         GVS2[geo_processor_sdf]
@@ -684,9 +684,9 @@ flowchart LR
     end
 
     subgraph GeometryRep_Surface_Internal
-        GS1[BQWarp (per radius)]
+        GS1[BQWarp per radius]
         GS2[GeoConvOut]
-        GS3[GeoProcessor / UNet]
+        GS3[GeoProcessor or UNet]
         GS4[geo_processor_out]
         GSS1[SDF: scale_sdf + binary + gradients]
         GSS2[geo_processor_sdf]
@@ -696,18 +696,18 @@ flowchart LR
     subgraph LocalEncoding
         L1[MultiGeometryEncoding Volume]
         L2[MultiGeometryEncoding Surface]
-        L1a[LocalGeometryEncoding → BQWarp + LocalPointConv]
-        L2a[LocalGeometryEncoding → BQWarp + LocalPointConv]
+        L1a[LocalGeometryEncoding to BQWarp + LocalPointConv]
+        L2a[LocalGeometryEncoding to BQWarp + LocalPointConv]
     end
 
     subgraph PositionEncoding
-        P1[fc_p_vol (FourierMLP)]
-        P2[fc_p_surf (FourierMLP)]
+        P1[fc_p_vol FourierMLP]
+        P2[fc_p_surf FourierMLP]
     end
 
     subgraph BasisFunctions
-        B1[nn_basis_vol (FourierMLP x num_variables)]
-        B2[nn_basis_surf (FourierMLP x num_variables)]
+        B1[nn_basis_vol FourierMLP x num_variables]
+        B2[nn_basis_surf FourierMLP x num_variables]
     end
 
     subgraph Aggregation
