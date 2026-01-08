@@ -21,6 +21,7 @@
 - [9. physicsnemo/datapipes/cae/domino_datapipe.py](#9-physicsnemodatapipescaedomino_datapipepy)
 - [10. 数据流图](#10-数据流图)
 - [11. 模型架构图](#11-模型架构图)
+- [12. 更详细的网络架构说明（含子部件与内部结构）](#12-更详细的网络架构说明含子部件与内部结构)
 
 ---
 
@@ -601,4 +602,141 @@ flowchart LR
 
 ---
 
-> 完整报告已合并（初版 + 逐行注释 + shape 变化 + 图示）。
+## 12. 更详细的网络架构说明（含子部件与内部结构）
+
+本节补充对 DoMINO **网络内部子部件与结构层级**的更细粒度描述，方便你无需回看源码即可理解各模块的内部组成。
+
+### 12.1 总体子模块分解
+
+DoMINO 由以下主要子模块组成：
+
+1. **Geometry Representation（几何表示）**
+   - `GeometryRep`（体积 / 表面各一套）
+   - 内部包含：`BQWarp`（球查询）、`GeoConvOut`（局部几何投影）、`GeoProcessor`/`UNet`（几何卷积/编码）、`geo_processor_sdf`（SDF 特征编码）、`combined_unet`（可选跨通道融合）
+
+2. **Local Geometry Encoding（局部几何编码）**
+   - `MultiGeometryEncoding`
+   - 内部包含多个 `LocalGeometryEncoding`（每个 radius 一套）
+   - 每个 `LocalGeometryEncoding` 内部包含 `BQWarp` + `LocalPointConv`
+
+3. **Position Encoding（位置编码）**
+   - `fc_p_vol` / `fc_p_surf`：FourierMLP，将点坐标或点相关特征映射到 latent embedding
+
+4. **Basis Functions（基函数）**
+   - `nn_basis_vol` / `nn_basis_surf`（多个 FourierMLP）
+   - 每个变量（field）独立一套 basis
+
+5. **Aggregation Model（聚合器）**
+   - `AggregationModel`（多变量多份）
+   - 内部结构：固定 5 层 MLP
+
+6. **Solution Calculators（输出解算）**
+   - `SolutionCalculatorVolume`
+   - `SolutionCalculatorSurface`
+   - 负责结合 basis + 几何编码 + 位置编码 (+ 参数编码) 进行邻域加权输出
+
+---
+
+### 12.2 GeometryRep 内部结构分解
+
+`GeometryRep` 是 DoMINO 最核心的结构之一。其内部包含两大分支：
+
+1. **STL 分支（几何网格信息）**
+   - 对每个 `radius`：  
+     - `BQWarp`：在规则 grid 上执行球查询，收集局部邻域点  
+     - `GeoConvOut`：将局部邻域点投影成 3D grid feature  
+     - `GeoProcessor` / `UNet`：通过 3D CNN 或 UNet 传播几何信息  
+     - `geo_processor_out`：最终输出单通道
+
+2. **SDF 分支（距离场信息）**
+   - 输入：`sdf`, `scaled_sdf`, `binary_sdf`, `sdf_x`, `sdf_y`, `sdf_z`
+   - `geo_processor_sdf`：3D CNN / UNet 编码  
+   - `geo_processor_sdf_out`：收敛成单通道
+
+3. **融合逻辑**
+   - `geo_encoding_type` 控制输出：
+     - `"stl"`：仅 STL 分支  
+     - `"sdf"`：仅 SDF 分支  
+     - `"both"`：STL + SDF 拼接  
+   - 若 `cross_attention=True`：额外通过 `combined_unet` 融合多通道
+
+---
+
+### 12.3 MultiGeometryEncoding / LocalGeometryEncoding 内部结构
+
+**MultiGeometryEncoding** 是多个半径的局部编码拼接：
+
+- 对每个 radius：
+  - `LocalGeometryEncoding`
+    - `BQWarp`：从 grid 上采样对应 radius 邻域特征
+    - `LocalPointConv`：2 层 MLP，对邻域特征做局部卷积式聚合
+
+输出即所有 radius 编码在特征维拼接。
+
+---
+
+### 12.4 Position Encoding 与 Basis Functions
+
+1. **Position Encoding**
+   - `fc_p_vol`：输入可包含 SDF 与几何关系向量（如 closest point、center of mass）  
+   - `fc_p_surf`：输入为 surface center of mass 相对位置  
+   - 均为 `FourierMLP`：  
+
+     ```
+     输入特征 → Fourier 特征扩展 → MLP → 位置 latent embedding
+     ```
+
+2. **Basis Functions**
+   - `nn_basis_vol` / `nn_basis_surf`：每个变量独立一套 FourierMLP  
+   - 输出作为基函数表征，用于后续聚合
+
+---
+
+### 12.5 AggregationModel 内部结构
+
+`AggregationModel` 是固定结构的 5 层 MLP：  
+
+```
+Input → Linear(base_layer) → Act
+     → Linear(base_layer) → Act
+     → Linear(base_layer) → Act
+     → Linear(base_layer) → Act
+     → Linear(1)
+```
+
+用于把 basis + geometry encoding + position encoding (+ 参数 encoding) 合并成最终输出。
+
+---
+
+### 12.6 Solution Calculator 内部结构
+
+#### 12.6.1 Volume 解算
+
+- 采样策略：
+  - 原始点  
+  - hop-1 邻域  
+  - hop-2 邻域（可选）  
+- 每个点计算：
+  - `basis_f = nn_basis[f](coords)`  
+  - 拼接 `encoding_node + encoding_g (+ param_encoding)`  
+  - 通过 `AggregationModel` 输出  
+- 对扰动点按 `1/distance` 权重进行加权平均
+
+#### 12.6.2 Surface 解算
+
+- 邻域由 KNN 得到  
+- 可拼接 normals / areas  
+- 通过距离加权融合邻域输出
+
+---
+
+### 12.7 Combined UNet（可选）
+
+当 `combined_vol_surf=True`：  
+- Volume / Surface 的 `GeometryRep` 输出会先拼接  
+- 再通过两套 UNet 分别投影回 volume / surface feature  
+- 用于 cross-scale 信息共享
+
+---
+
+> 完整报告已合并（初版 + 逐行注释 + shape 变化 + 图示 + 更详细架构说明）。
